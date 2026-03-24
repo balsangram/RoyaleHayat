@@ -1,0 +1,123 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 33% 97%;
+    --foreground: 336 56% 18%;
+
+    --card: 40 33% 97%;
+    --card-foreground: 336 56% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 336 56% 18%;
+
+    --primary: 340 58% 30%;
+    --primary-foreground: 40 33% 97%;
+
+    --secondary: 40 20% 80%;
+    --secondary-foreground: 336 56% 18%;
+
+    --muted: 37 18% 83%;
+    --muted-foreground: 336 20% 40%;
+
+    --accent: 45 22% 44%;
+    --accent-foreground: 40 33% 97%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 37 18% 85%;
+    --input: 37 18% 85%;
+    --ring: 340 58% 30%;
+
+    --radius: 0.75rem;
+
+    /* Brand colors */
+    --deep-maroon: 336 56% 18%;
+    --royale-burgundy: 340 58% 30%;
+    --antique-gold: 45 22% 44%;
+    --warm-sand: 37 18% 80%;
+    --alabaster: 40 33% 97%;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
+}
+
+@layer utilities {
+  .text-gold {
+    color: hsl(var(--antique-gold));
+  }
+  .bg-deep-maroon {
+    background-color: hsl(var(--deep-maroon));
+  }
+  .bg-royale-burgundy {
+    background-color: hsl(var(--royale-burgundy));
+  }
+  .bg-warm-sand {
+    background-color: hsl(var(--warm-sand));
+  }
+  .bg-alabaster {
+    background-color: hsl(var(--alabaster));
+  }
+  .text-deep-maroon {
+    color: hsl(var(--deep-maroon));
+  }
+  .text-royale-burgundy {
+    color: hsl(var(--royale-burgundy));
+  }
+  .text-alabaster {
+    color: hsl(var(--alabaster));
+  }
+  .border-gold {
+    border-color: hsl(var(--antique-gold));
+  }
+  .border-warm-sand {
+    border-color: hsl(var(--warm-sand));
+  }
+}
+
+/* Premium micro-interactions */
+@layer components {
+  .card-hover {
+    @apply transition-all duration-300;
+  }
+  .card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 40px -15px rgba(74, 20, 35, 0.12);
+  }
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  overflow-x: hidden;
+}
