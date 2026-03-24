@@ -1,4 +1,9 @@
-# Welcome to your Lovable project
+# Royale Hayat Hospital
 
-TODO: Document your project here
-# RoyaleHayat
+Kuwait's premier multi-disciplinary healthcare provider since 2006.
+
+## Development
+
+1. Install dependencies: `npm install`
+2. Start dev server: `npm run dev`
+
