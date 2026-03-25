@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
-  Brain, Sparkles, Stethoscope, Building2, User, CalendarDays, CheckCircle2,
+  Brain, Sparkles, Stethoscope, Building2, User, CheckCircle2,
   Search, ArrowRight, ArrowLeft, Clock, Shield, Zap, Star,
   Activity, Heart, Baby, Eye, Bone, Pill, Microscope, Scissors, Smile,
-  AlertCircle, PartyPopper, FileText, Thermometer, Info, ClipboardList
+  AlertCircle, FileText, Thermometer, ClipboardList, UserPlus, LogIn
 } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import ScrollToTop from "@/components/ScrollToTop";
@@ -56,7 +57,6 @@ const departments = [
 const doctorsData: Record<number, Array<{
   id: number; name: string; specialty: string; available: boolean;
   languages: string[]; experience: string; rating: number;
-  previouslyConsulted?: boolean;
 }>> = {};
 
 departments.forEach((dept) => {
@@ -71,50 +71,17 @@ departments.forEach((dept) => {
     languages: i % 2 === 0 ? ["English", "Arabic"] : ["English", "Arabic", "Hindi"],
     experience: `${8 + Math.floor(Math.random() * 15)}+ Years`,
     rating: 4.2 + Math.round(Math.random() * 8) / 10,
-    previouslyConsulted: i === 0 && dept.id <= 5,
   }));
 });
 
-const generateTimeSlots = () => {
-  const slots: string[] = [];
-  for (let h = 8; h <= 17; h++) {
-    slots.push(`${h.toString().padStart(2, "0")}:00`);
-    if (h < 17) slots.push(`${h.toString().padStart(2, "0")}:30`);
-  }
-  return slots;
-};
-
-const timeSlots = generateTimeSlots();
-
-const getNext7Days = () => {
-  const days: Date[] = [];
-  const today = new Date();
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    days.push(d);
-  }
-  return days;
-};
-
-const nationalities = [
-  "Kuwaiti", "Saudi", "Emirati", "Bahraini", "Omani", "Qatari",
-  "Egyptian", "Jordanian", "Lebanese", "Syrian", "Iraqi", "Palestinian",
-  "Indian", "Pakistani", "Filipino", "Bangladeshi", "Sri Lankan",
-  "British", "American", "Canadian", "Australian", "French", "German",
-  "Other",
-];
-
+// Steps: Symptoms → Department → Doctor → Patient Info → Confirm (NO schedule)
 const steps = [
   { label: "Symptoms", icon: Stethoscope },
   { label: "Department", icon: Building2 },
   { label: "Doctor", icon: User },
-  { label: "Schedule", icon: CalendarDays },
   { label: "Patient Info", icon: ClipboardList },
   { label: "Confirm", icon: CheckCircle2 },
 ];
-
-// ─── AI SIMULATION HELPERS ───────────────────────────────────────────────────
 
 function getAIDepartmentSuggestions(symptoms: string[]): number[] {
   const lower = symptoms.map((s) => s.toLowerCase());
@@ -123,16 +90,12 @@ function getAIDepartmentSuggestions(symptoms: string[]): number[] {
     const hits = dept.keywords.filter((k) => lower.some((s) => s.includes(k) || k.includes(s))).length;
     if (hits > 0) scores[dept.id] = hits;
   });
-  return Object.entries(scores)
-    .sort((a, b) => b[1] - a[1])
-    .map(([id]) => Number(id));
+  return Object.entries(scores).sort((a, b) => b[1] - a[1]).map(([id]) => Number(id));
 }
 
-function getAIDoctorRecommendations(deptId: number, _symptoms: string[]): number[] {
+function getAIDoctorRecommendations(deptId: number): number[] {
   const docs = doctorsData[deptId] || [];
   const sorted = [...docs].sort((a, b) => {
-    if (a.previouslyConsulted && !b.previouslyConsulted) return -1;
-    if (!a.previouslyConsulted && b.previouslyConsulted) return 1;
     if (a.available && !b.available) return -1;
     if (!a.available && b.available) return 1;
     return b.rating - a.rating;
@@ -162,6 +125,7 @@ function getAIInsights(symptoms: string[]) {
 
 const BookAppointment = () => {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const [step, setStep] = useState(0);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -179,26 +143,15 @@ const BookAppointment = () => {
   const [aiRecommendedDocs, setAiRecommendedDocs] = useState<number[]>([]);
   const [isRequestMode, setIsRequestMode] = useState(false);
 
-  // Step 3: Schedule
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  const [unavailableSlots] = useState<string[]>(() => {
-    const count = 3 + Math.floor(Math.random() * 4);
-    const shuffled = [...timeSlots].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, count);
-  });
-
-  // Step 4: Patient Details
+  // Step 3: Patient Details
+  const [patientType, setPatientType] = useState<"returning" | "new" | null>(null);
   const [patientName, setPatientName] = useState("");
   const [patientPhone, setPatientPhone] = useState("");
   const [patientCountryCode, setPatientCountryCode] = useState("+965");
-  const [patientNationality, setPatientNationality] = useState("");
-  const [patientEmail, setPatientEmail] = useState("");
-  const [patientGender, setPatientGender] = useState("");
   const [patientAge, setPatientAge] = useState("");
+  const [patientGender, setPatientGender] = useState("");
   const [patientErrors, setPatientErrors] = useState<Record<string, string>>({});
 
-  // Done
   const [booked, setBooked] = useState(false);
 
   const allSymptoms = [...selectedChips, ...(symptomText.trim() ? [symptomText.trim()] : [])];
@@ -215,7 +168,7 @@ const BookAppointment = () => {
 
   useEffect(() => {
     if (selectedDept !== null) {
-      setAiRecommendedDocs(getAIDoctorRecommendations(selectedDept, allSymptoms));
+      setAiRecommendedDocs(getAIDoctorRecommendations(selectedDept));
     }
   }, [selectedDept]);
 
@@ -234,16 +187,15 @@ const BookAppointment = () => {
   const doctors = selectedDept ? doctorsData[selectedDept] || [] : [];
   const selectedDeptObj = departments.find((d) => d.id === selectedDept);
   const selectedDoctorObj = doctors.find((d) => d.id === selectedDoctor);
-  const dates = getNext7Days();
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   const validatePatientDetails = () => {
     const errors: Record<string, string> = {};
     if (!patientName.trim()) errors.name = "Full name is required";
     if (!patientPhone.trim()) errors.phone = "Phone number is required";
     else if (!/^\d{7,15}$/.test(patientPhone.trim())) errors.phone = "Enter a valid phone number";
-    if (!patientNationality) errors.nationality = "Please select your nationality";
+    if (!patientAge.trim()) errors.age = "Age is required";
+    else if (isNaN(Number(patientAge)) || Number(patientAge) < 0 || Number(patientAge) > 150) errors.age = "Enter a valid age";
+    if (!patientGender) errors.gender = "Gender is required";
     setPatientErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -252,33 +204,24 @@ const BookAppointment = () => {
     switch (step) {
       case 0: return allSymptoms.length > 0;
       case 1: return selectedDept !== null;
-      case 2: return selectedDoctor !== null && (isRequestMode || (doctors.find(d => d.id === selectedDoctor)?.available ?? false));
-      case 3: return selectedDate !== null && selectedTime !== null;
-      case 4: return patientName.trim() !== "" && patientPhone.trim() !== "" && patientNationality !== "";
+      case 2: return selectedDoctor !== null;
+      case 3: return patientType === "new" && patientName.trim() !== "" && patientPhone.trim() !== "" && patientAge.trim() !== "" && patientGender !== "";
       default: return true;
     }
   };
 
   const handleNext = () => {
     if (step === 0) { handleSymptomContinue(); return; }
-    if (step === 4) {
+    if (step === 3) {
+      if (patientType !== "new") return;
       if (!validatePatientDetails()) return;
     }
-    if (step === 5) { setBooked(true); return; }
-    // In request mode, skip schedule (step 3) — go from doctor (2) to patient details (4)
-    if (step === 2 && isRequestMode) {
-      setStep(4);
-      return;
-    }
-    setStep((s) => Math.min(s + 1, 5));
+    if (step === 4) { setBooked(true); return; }
+    if (step === 2 && isRequestMode) { setStep(3); return; }
+    setStep((s) => Math.min(s + 1, 4));
   };
 
   const handleBack = () => {
-    // In request mode, going back from patient details (4) should go to doctor (2)
-    if (step === 4 && isRequestMode) {
-      setStep(2);
-      return;
-    }
     setStep((s) => Math.max(s - 1, 0));
   };
 
@@ -294,115 +237,120 @@ const BookAppointment = () => {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <div className="container mx-auto px-6 py-20 max-w-3xl">
+        <div className="pt-[76px]">
+          {/* Full-width confirmation banner */}
           <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.6, type: "spring" }}
-            className="text-center mb-12"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6 }}
+            className="bg-primary py-16 text-center"
           >
-            <div className="w-20 h-20 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-6">
-              <PartyPopper className="w-10 h-10 text-accent" />
-            </div>
-            <h1 className="text-4xl font-serif text-foreground mb-3">
-              {isRequestMode ? "Appointment Request Submitted!" : "Appointment Confirmed!"}
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+              className="w-20 h-20 rounded-full bg-primary-foreground/20 flex items-center justify-center mx-auto mb-6"
+            >
+              <CheckCircle2 className="w-10 h-10 text-primary-foreground" />
+            </motion.div>
+            <h1 className="text-3xl md:text-5xl font-serif text-primary-foreground mb-3">
+              {isRequestMode ? t("requestSubmitted") : t("appointmentConfirmed")}
             </h1>
-            <p className="text-muted-foreground font-body">
-              {isRequestMode
-                ? "Your appointment request has been submitted. We will get back to you within 6–12 hours."
-                : "Your booking has been successfully registered."}
+            <p className="text-primary-foreground/70 font-body text-sm max-w-md mx-auto">
+              {isRequestMode ? t("requestConfirmMsg") : t("bookingConfirmMsg")}
             </p>
           </motion.div>
 
-          {/* Summary Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-popover rounded-2xl border border-border p-8 mb-8 shadow-sm"
-          >
-            <h3 className="font-serif text-lg text-foreground mb-4">Booking Summary</h3>
-            <div className="grid grid-cols-2 gap-4 font-body text-sm">
-              <div><span className="text-muted-foreground">Patient:</span><br /><span className="text-foreground font-medium">{patientName}</span></div>
-              <div><span className="text-muted-foreground">Phone:</span><br /><span className="text-foreground font-medium">{patientCountryCode} {patientPhone}</span></div>
-              <div><span className="text-muted-foreground">Department:</span><br /><span className="text-foreground font-medium">{selectedDeptObj?.name}</span></div>
-              <div><span className="text-muted-foreground">Doctor:</span><br /><span className="text-foreground font-medium">{selectedDoctorObj?.name}</span></div>
-              {!isRequestMode && (
-                <>
-                  <div><span className="text-muted-foreground">Date:</span><br /><span className="text-foreground font-medium">{selectedDate && `${dayNames[selectedDate.getDay()]}, ${selectedDate.getDate()} ${monthNames[selectedDate.getMonth()]}`}</span></div>
-                  <div><span className="text-muted-foreground">Time:</span><br /><span className="text-foreground font-medium">{selectedTime}</span></div>
-                </>
-              )}
-              {isRequestMode && (
-                <div className="col-span-2">
-                  <span className="text-muted-foreground">Status:</span><br />
-                  <span className="text-accent font-medium">Pending — We will contact you within 6–12 hours</span>
-                </div>
-              )}
-              <div className="col-span-2"><span className="text-muted-foreground">Symptoms:</span><br /><span className="text-foreground font-medium">{allSymptoms.join(", ")}</span></div>
-            </div>
-          </motion.div>
-
-          {/* AI Health Insights */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="bg-primary/5 border border-primary/10 rounded-2xl p-8 mb-8"
-          >
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
-                <Brain className="w-5 h-5 text-accent" />
-              </div>
-              <div>
-                <h3 className="font-serif text-lg text-foreground">AI Health Insights</h3>
-                <p className="text-muted-foreground font-body text-xs">Personalized analysis based on your symptoms</p>
-              </div>
-            </div>
-            <div className="space-y-4">
-              {insights.map((ins, i) => (
-                <div key={i} className="bg-popover rounded-xl p-4 border border-border">
-                  <p className="font-body text-sm font-medium text-foreground mb-1">{ins.condition}</p>
-                  <p className="font-body text-xs text-muted-foreground">{ins.precaution}</p>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-
-          {/* Preparation */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
-            className="bg-popover rounded-2xl border border-border p-8 mb-8"
-          >
-            <h3 className="font-serif text-lg text-foreground mb-4 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-accent" />
-              Before Your Appointment
-            </h3>
-            <ul className="space-y-3 font-body text-sm text-muted-foreground">
-              {[
-                "Bring a valid ID and insurance card",
-                "List of current medications",
-                "Previous medical reports or lab results",
-                "Arrive 15 minutes before your scheduled time",
-                "Wear comfortable clothing for examination",
-              ].map((item, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </motion.div>
-
-          <div className="text-center">
-            <button
-              onClick={() => navigate("/")}
-              className="bg-primary text-primary-foreground px-10 py-3.5 rounded-lg font-body text-sm tracking-widest uppercase hover:bg-primary/90 transition-colors"
+          <div className="container mx-auto px-6 py-12 max-w-3xl">
+            {/* Appointment Details Card */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-popover rounded-2xl border border-border p-8 mb-6 shadow-sm -mt-8"
             >
-              Back to Home
-            </button>
+              <h3 className="font-serif text-lg text-foreground mb-5">{t("appointmentDetails")}</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 font-body text-sm">
+                <div className="flex items-start gap-3">
+                  <User className="w-5 h-5 text-accent mt-0.5" />
+                  <div>
+                    <p className="text-muted-foreground text-xs uppercase tracking-wider">{t("doctor")}</p>
+                    <p className="text-foreground font-medium">{selectedDoctorObj?.name}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Building2 className="w-5 h-5 text-accent mt-0.5" />
+                  <div>
+                    <p className="text-muted-foreground text-xs uppercase tracking-wider">{t("department")}</p>
+                    <p className="text-foreground font-medium">{selectedDeptObj?.name}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <ClipboardList className="w-5 h-5 text-accent mt-0.5" />
+                  <div>
+                    <p className="text-muted-foreground text-xs uppercase tracking-wider">{t("patient")}</p>
+                    <p className="text-foreground font-medium">{patientName}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Stethoscope className="w-5 h-5 text-accent mt-0.5" />
+                  <div>
+                    <p className="text-muted-foreground text-xs uppercase tracking-wider">{t("symptoms")}</p>
+                    <p className="text-foreground font-medium">{allSymptoms.join(", ")}</p>
+                  </div>
+                </div>
+                {isRequestMode && (
+                  <div className="sm:col-span-2 flex items-start gap-3">
+                    <Clock className="w-5 h-5 text-accent mt-0.5" />
+                    <div>
+                      <p className="text-muted-foreground text-xs uppercase tracking-wider">{t("status")}</p>
+                      <p className="text-accent font-medium">{t("pendingStatus")}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+
+            {/* Next Steps */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+              className="bg-popover rounded-2xl border border-border p-8 mb-6">
+              <h3 className="font-serif text-lg text-foreground mb-4 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-accent" />
+                {t("nextSteps")}
+              </h3>
+              <ul className="space-y-3 font-body text-sm text-muted-foreground">
+                {[t("step1"), t("step2"), t("step3"), t("step4"), t("step5")].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </motion.div>
+
+            {/* AI Insights */}
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
+              className="bg-primary/5 border border-primary/10 rounded-2xl p-8 mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <Brain className="w-5 h-5 text-accent" />
+                <h3 className="font-serif text-lg text-foreground">{t("aiHealthInsights")}</h3>
+              </div>
+              <div className="space-y-3">
+                {insights.map((ins, i) => (
+                  <div key={i} className="bg-popover rounded-xl p-4 border border-border">
+                    <p className="font-body text-sm font-medium text-foreground mb-1">{ins.condition}</p>
+                    <p className="font-body text-xs text-muted-foreground">{ins.precaution}</p>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+
+            <div className="text-center">
+              <button onClick={() => navigate("/")}
+                className="bg-primary text-primary-foreground px-10 py-3.5 rounded-lg font-body text-sm tracking-widest uppercase hover:bg-primary/90 transition-colors">
+                {t("backToHome")}
+              </button>
+            </div>
           </div>
         </div>
         <Footer />
@@ -415,19 +363,13 @@ const BookAppointment = () => {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-
-      <div className="container mx-auto px-6 py-12 max-w-5xl">
-        {/* Title */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-10"
-        >
+      <div className="container mx-auto px-6 py-12 max-w-5xl pt-[100px]">
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-10">
           <div className="inline-flex items-center gap-2 bg-primary/5 rounded-full px-4 py-1.5 mb-4">
             <Sparkles className="w-4 h-4 text-accent" />
-            <span className="text-accent text-xs tracking-[0.3em] uppercase font-body">AI-Assisted Booking</span>
+            <span className="text-accent text-xs tracking-[0.3em] uppercase font-body">{t("aiAssistedBooking")}</span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-serif text-foreground">Book Your Appointment</h1>
+          <h1 className="text-3xl md:text-4xl font-serif text-foreground">{t("bookYourAppointment")}</h1>
         </motion.div>
 
         {/* Progress Steps */}
@@ -456,37 +398,23 @@ const BookAppointment = () => {
           ))}
         </div>
 
-        {/* AI Loading Overlay */}
+        {/* AI Loading */}
         <AnimatePresence>
           {aiLoading && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center"
-            >
-              <motion.div
-                initial={{ scale: 0.9 }}
-                animate={{ scale: 1 }}
-                className="bg-popover rounded-2xl p-10 shadow-xl border border-border text-center max-w-sm"
-              >
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                  className="w-16 h-16 rounded-full border-2 border-accent/20 border-t-accent mx-auto mb-4"
-                />
-                <h3 className="font-serif text-lg text-foreground mb-2">AI Analyzing Symptoms</h3>
-                <p className="font-body text-sm text-muted-foreground">
-                  Cross-referencing medical databases to find the best departments and specialists for you...
-                </p>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center">
+              <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }}
+                className="bg-popover rounded-2xl p-10 shadow-xl border border-border text-center max-w-sm">
+                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                  className="w-16 h-16 rounded-full border-2 border-accent/20 border-t-accent mx-auto mb-4" />
+                <h3 className="font-serif text-lg text-foreground mb-2">{t("analyzing")}</h3>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Step Content */}
         <AnimatePresence mode="wait">
-          {/* ─── STEP 0: SYMPTOMS ─── */}
+          {/* STEP 0: SYMPTOMS */}
           {step === 0 && (
             <motion.div key="s0" variants={pageVariants} initial="initial" animate="animate" exit="exit" transition={{ duration: 0.35 }}>
               <div className="max-w-3xl mx-auto">
@@ -495,78 +423,57 @@ const BookAppointment = () => {
                     <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
                       <Brain className="w-5 h-5 text-accent" />
                     </div>
-                    <div>
-                      <h2 className="text-xl font-serif text-foreground">Tell Us Your Symptoms</h2>
-                    </div>
+                    <h2 className="text-xl font-serif text-foreground">{t("tellUsSymptoms")}</h2>
                   </div>
-                  <p className="text-muted-foreground font-body text-sm mb-6 ml-[52px]">
-                    Our AI analyzes patterns across millions of medical cases to recommend the right specialist for you.
-                  </p>
-
                   <div className="flex flex-wrap gap-4 mb-6 ml-[52px]">
-                    {[
-                      { icon: Zap, text: "Instant AI Analysis" },
-                      { icon: Shield, text: "Clinically Validated" },
-                      { icon: Clock, text: "24/7 Available" },
-                    ].map((f) => (
+                    {[{ icon: Zap, text: t("instantAI") }, { icon: Shield, text: t("clinicallyValidated") }, { icon: Clock, text: t("available247") }].map((f) => (
                       <div key={f.text} className="flex items-center gap-1.5 text-muted-foreground">
                         <f.icon className="w-3.5 h-3.5 text-accent" />
                         <span className="font-body text-xs">{f.text}</span>
                       </div>
                     ))}
                   </div>
-
                   <textarea
                     value={symptomText}
                     onChange={(e) => setSymptomText(e.target.value)}
-                    placeholder="Describe your symptoms in detail, e.g., 'I've been experiencing headaches and dizziness for the past week...'"
+                    placeholder={t("describeInDetail")}
                     className="w-full h-28 bg-muted/20 border border-border rounded-xl p-5 font-body text-sm text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all mb-6"
                   />
-
-                  <p className="font-body text-xs text-muted-foreground mb-3 uppercase tracking-wider">Quick select symptoms</p>
+                  <p className="font-body text-xs text-muted-foreground mb-3 uppercase tracking-wider">{t("quickSelect")}</p>
                   <div className="flex flex-wrap gap-2 mb-6">
                     {symptomChips.map((chip) => (
-                      <motion.button
-                        key={chip}
-                        whileHover={{ scale: 1.04 }}
-                        whileTap={{ scale: 0.96 }}
+                      <motion.button key={chip} whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
                         onClick={() => toggleChip(chip)}
                         className={`px-4 py-2 rounded-full text-xs font-body tracking-wide transition-all duration-200 border ${
                           selectedChips.includes(chip)
                             ? "bg-primary text-primary-foreground border-primary shadow-sm"
                             : "bg-background border-border text-muted-foreground hover:border-accent hover:text-accent"
-                        }`}
-                      >
+                        }`}>
                         {chip}
                       </motion.button>
                     ))}
                   </div>
-
                   {selectedChips.length > 0 && (
                     <div className="bg-accent/5 rounded-xl p-4 border border-accent/10 mb-4">
                       <p className="font-body text-xs text-accent font-medium mb-1">
                         <Sparkles className="w-3 h-3 inline mr-1" />
-                        {selectedChips.length} symptom{selectedChips.length > 1 ? "s" : ""} selected
+                        {selectedChips.length} {t("symptomsSelected")}
                       </p>
                       <p className="font-body text-xs text-muted-foreground">
-                        {selectedChips.join(", ")}
-                        {symptomText.trim() && `, ${symptomText.trim()}`}
+                        {selectedChips.join(", ")}{symptomText.trim() && `, ${symptomText.trim()}`}
                       </p>
                     </div>
                   )}
-
-                  <div className="flex items-center justify-between pt-2">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Shield className="w-4 h-4 text-accent" />
-                      <span className="font-body text-xs">Your data is encrypted and confidential</span>
-                    </div>
+                  <div className="flex items-center gap-2 text-muted-foreground pt-2">
+                    <Shield className="w-4 h-4 text-accent" />
+                    <span className="font-body text-xs">{t("dataEncrypted")}</span>
                   </div>
                 </div>
               </div>
             </motion.div>
           )}
 
-          {/* ─── STEP 1: DEPARTMENTS ─── */}
+          {/* STEP 1: DEPARTMENTS */}
           {step === 1 && (
             <motion.div key="s1" variants={pageVariants} initial="initial" animate="animate" exit="exit" transition={{ duration: 0.35 }}>
               <div className="max-w-4xl mx-auto">
@@ -574,28 +481,24 @@ const BookAppointment = () => {
                   <div className="bg-accent/5 rounded-2xl p-6 border border-accent/10 mb-6">
                     <div className="flex items-center gap-2 mb-3">
                       <Brain className="w-4 h-4 text-accent" />
-                      <h3 className="font-body text-sm font-medium text-accent">AI Recommended Departments</h3>
+                      <h3 className="font-body text-sm font-medium text-accent">{t("aiRecommendedDepts")}</h3>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {aiSuggestedDepts.slice(0, 6).map((id) => {
                         const dept = departments.find((d) => d.id === id)!;
                         return (
-                          <motion.button
-                            key={dept.id}
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
+                          <motion.button key={dept.id} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                             onClick={() => setSelectedDept(dept.id)}
                             className={`flex items-center gap-3 p-4 rounded-xl border transition-all text-left ${
                               selectedDept === dept.id
                                 ? "bg-primary text-primary-foreground border-primary"
                                 : "bg-popover border-accent/20 hover:border-accent text-foreground"
-                            }`}
-                          >
+                            }`}>
                             <dept.icon className="w-5 h-5 flex-shrink-0" />
                             <div>
                               <p className="font-body text-sm font-medium">{dept.name}</p>
                               <p className={`font-body text-xs ${selectedDept === dept.id ? "text-primary-foreground/70" : "text-accent"}`}>
-                                <Sparkles className="w-3 h-3 inline mr-1" />AI Match
+                                <Sparkles className="w-3 h-3 inline mr-1" />{t("aiMatch")}
                               </p>
                             </div>
                           </motion.button>
@@ -604,26 +507,17 @@ const BookAppointment = () => {
                     </div>
                   </div>
                 )}
-
                 <div className="relative mb-6">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={deptSearch}
-                    onChange={(e) => setDeptSearch(e.target.value)}
-                    placeholder="Search departments..."
-                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-border bg-popover font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30"
-                  />
+                  <input type="text" value={deptSearch} onChange={(e) => setDeptSearch(e.target.value)}
+                    placeholder={t("searchDepartments")}
+                    className="w-full pl-11 pr-4 py-3 rounded-xl border border-border bg-popover font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30" />
                 </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {filteredDepts.map((dept) => {
                     const isAI = aiSuggestedDepts.includes(dept.id);
                     return (
-                      <motion.button
-                        key={dept.id}
-                        whileHover={{ scale: 1.02, y: -2 }}
-                        whileTap={{ scale: 0.98 }}
+                      <motion.button key={dept.id} whileHover={{ scale: 1.02, y: -2 }} whileTap={{ scale: 0.98 }}
                         onClick={() => setSelectedDept(dept.id)}
                         className={`flex items-center gap-3 p-4 rounded-xl border transition-all text-left ${
                           selectedDept === dept.id
@@ -631,14 +525,11 @@ const BookAppointment = () => {
                             : isAI
                             ? "bg-accent/5 border-accent/20 hover:border-accent text-foreground"
                             : "bg-popover border-border hover:border-accent/40 text-foreground"
-                        }`}
-                      >
+                        }`}>
                         <dept.icon className={`w-5 h-5 flex-shrink-0 ${selectedDept === dept.id ? "" : "text-accent"}`} />
                         <div className="min-w-0">
                           <p className="font-body text-sm font-medium truncate">{dept.name}</p>
-                          <p className={`font-body text-xs ${selectedDept === dept.id ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
-                            {dept.category}
-                          </p>
+                          <p className={`font-body text-xs ${selectedDept === dept.id ? "text-primary-foreground/60" : "text-muted-foreground"}`}>{dept.category}</p>
                         </div>
                       </motion.button>
                     );
@@ -648,58 +539,21 @@ const BookAppointment = () => {
             </motion.div>
           )}
 
-          {/* ─── STEP 2: DOCTORS ─── */}
+          {/* STEP 2: DOCTORS */}
           {step === 2 && (
             <motion.div key="s2" variants={pageVariants} initial="initial" animate="animate" exit="exit" transition={{ duration: 0.35 }}>
               <div className="max-w-4xl mx-auto">
-                {doctors.some((d) => d.previouslyConsulted) && (
-                  <div className="bg-accent/5 rounded-2xl p-5 border border-accent/10 mb-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Info className="w-4 h-4 text-accent" />
-                      <h3 className="font-body text-sm font-medium text-accent">Previously Consulted</h3>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      {doctors.filter((d) => d.previouslyConsulted).map((doc) => (
-                        <motion.button
-                          key={doc.id}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => setSelectedDoctor(doc.id)}
-                          className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
-                            selectedDoctor === doc.id
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-popover border-accent/20 hover:border-accent text-foreground"
-                          }`}
-                        >
-                          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-serif text-sm">
-                            {doc.name.split(" ").slice(1).map(n => n[0]).join("")}
-                          </div>
-                          <div className="text-left">
-                            <p className="font-body text-sm font-medium">{doc.name}</p>
-                            <p className={`font-body text-xs ${selectedDoctor === doc.id ? "text-primary-foreground/70" : "text-muted-foreground"}`}>Your previous doctor</p>
-                          </div>
-                        </motion.button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {aiRecommendedDocs.length > 0 && (
-                  <div className="mb-6">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Brain className="w-4 h-4 text-accent" />
-                      <h3 className="font-body text-sm font-medium text-accent">AI Recommended Doctors</h3>
-                    </div>
+                  <div className="mb-4 flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-accent" />
+                    <h3 className="font-body text-sm font-medium text-accent">{t("aiRecommendedDocs")}</h3>
                   </div>
                 )}
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {doctors.map((doc) => {
                     const isRecommended = aiRecommendedDocs.includes(doc.id);
                     return (
-                      <motion.div
-                        key={doc.id}
-                        whileHover={{ y: -3 }}
+                      <motion.div key={doc.id} whileHover={{ y: -3 }}
                         className={`relative rounded-2xl border p-5 transition-all cursor-pointer ${
                           selectedDoctor === doc.id
                             ? "bg-primary/5 border-primary shadow-md"
@@ -708,11 +562,10 @@ const BookAppointment = () => {
                         onClick={() => {
                           setSelectedDoctor(doc.id);
                           setIsRequestMode(!doc.available);
-                        }}
-                      >
+                        }}>
                         {isRecommended && (
                           <div className="absolute top-3 right-3 bg-accent/10 text-accent px-2 py-0.5 rounded-full text-[10px] font-body tracking-wide flex items-center gap-1">
-                            <Sparkles className="w-3 h-3" /> AI Pick
+                            <Sparkles className="w-3 h-3" /> {t("aiPick")}
                           </div>
                         )}
                         <div className="flex items-start gap-4">
@@ -733,40 +586,18 @@ const BookAppointment = () => {
                                 <span key={l} className="font-body text-[10px] text-muted-foreground border border-border px-2 py-0.5 rounded-full">{l}</span>
                               ))}
                             </div>
-
                             {doc.available ? (
                               <div className="flex items-center gap-1.5 text-green-600">
                                 <div className="w-2 h-2 rounded-full bg-green-500" />
-                                <span className="font-body text-xs">Available</span>
+                                <span className="font-body text-xs">{t("available")}</span>
                               </div>
                             ) : (
-                              <div className="space-y-2">
+                              <div className="space-y-1.5">
                                 <div className="flex items-center gap-1.5 text-destructive">
                                   <div className="w-2 h-2 rounded-full bg-destructive" />
-                                  <span className="font-body text-xs">Not Available</span>
+                                  <span className="font-body text-xs">{t("currentlyUnavailable")}</span>
                                 </div>
-                                {!(selectedDoctor === doc.id && isRequestMode) ? (
-                                  <motion.button
-                                    whileTap={{ scale: 0.95 }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDoctor(doc.id);
-                                      setIsRequestMode(true);
-                                    }}
-                                    className="font-body text-xs bg-primary/10 text-primary px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-colors"
-                                  >
-                                    Request Appointment
-                                  </motion.button>
-                                ) : (
-                                  <div>
-                                    <p className="font-body text-xs text-accent flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3" /> Request Sent
-                                    </p>
-                                    <p className="font-body text-[10px] text-muted-foreground mt-1">
-                                      We will get back to you within 6–12 hours
-                                    </p>
-                                  </div>
-                                )}
+                                <p className="font-body text-[10px] text-muted-foreground">{t("clickToRequest")}</p>
                               </div>
                             )}
                           </div>
@@ -775,252 +606,185 @@ const BookAppointment = () => {
                     );
                   })}
                 </div>
-
-                {/* Doctor not available CTA */}
-                <div className="mt-8 bg-primary/5 rounded-2xl p-6 border border-primary/10 text-center">
-                  <h3 className="font-serif text-lg text-foreground mb-2">Doctor not available?</h3>
-                  <p className="font-body text-sm text-muted-foreground mb-4 max-w-md mx-auto">
-                    Can't find a suitable time? Submit a request and our team will arrange an appointment for you.
-                  </p>
-                  <motion.button
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
-                    onClick={() => {
-                      if (selectedDoctor) {
-                        setIsRequestMode(true);
-                        setStep(4); // Skip to patient details
-                      }
-                    }}
-                    disabled={!selectedDoctor}
-                    className={`px-8 py-3 rounded-lg font-body text-sm tracking-widest uppercase transition-colors inline-flex items-center gap-2 ${
-                      selectedDoctor
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                        : "bg-muted text-muted-foreground cursor-not-allowed"
-                    }`}
-                  >
-                    <Clock className="w-4 h-4" />
-                    Request Appointment
-                  </motion.button>
-                  <p className="font-body text-xs text-muted-foreground mt-3">
-                    We will get back to you within 6–12 hours
-                  </p>
-                </div>
               </div>
             </motion.div>
           )}
 
-          {/* ─── STEP 3: SCHEDULE ─── */}
+          {/* STEP 3: PATIENT INFO */}
           {step === 3 && (
             <motion.div key="s3" variants={pageVariants} initial="initial" animate="animate" exit="exit" transition={{ duration: 0.35 }}>
               <div className="max-w-3xl mx-auto">
-                <div className="bg-popover rounded-2xl p-8 border border-border shadow-sm">
-                  <h2 className="font-serif text-xl text-foreground mb-6">Select Date & Time</h2>
+                {!patientType && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                    <motion.button
+                      whileHover={{ y: -4, boxShadow: "0 12px 24px -8px rgba(74,20,35,0.12)" }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setPatientType("returning")}
+                      className="bg-popover rounded-2xl p-8 border border-border text-center transition-all hover:border-primary/40"
+                    >
+                      <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                        <LogIn className="w-7 h-7 text-primary" />
+                      </div>
+                      <h3 className="font-serif text-lg text-foreground mb-2">{t("registeredPatient")}</h3>
+                      <p className="font-body text-xs text-muted-foreground">{t("alreadyAccount")}</p>
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ y: -4, boxShadow: "0 12px 24px -8px rgba(74,20,35,0.12)" }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setPatientType("new")}
+                      className="bg-popover rounded-2xl p-8 border border-border text-center transition-all hover:border-primary/40"
+                    >
+                      <div className="w-14 h-14 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
+                        <UserPlus className="w-7 h-7 text-accent" />
+                      </div>
+                      <h3 className="font-serif text-lg text-foreground mb-2">{t("firstTimeVisitor")}</h3>
+                      <p className="font-body text-xs text-muted-foreground">{t("newToRoyale")}</p>
+                    </motion.button>
+                  </div>
+                )}
 
-                  <p className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-3">Available Dates</p>
-                  <div className="flex gap-3 mb-8 overflow-x-auto pb-2">
-                    {dates.map((d) => (
-                      <motion.button
-                        key={d.toISOString()}
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => setSelectedDate(d)}
-                        className={`flex flex-col items-center px-5 py-3 rounded-xl border transition-all flex-shrink-0 ${
-                          selectedDate?.toDateString() === d.toDateString()
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "bg-background border-border hover:border-accent/40 text-foreground"
-                        }`}
-                      >
-                        <span className="font-body text-xs uppercase">{dayNames[d.getDay()]}</span>
-                        <span className="font-serif text-xl">{d.getDate()}</span>
-                        <span className="font-body text-[10px] uppercase">{monthNames[d.getMonth()]}</span>
+                {patientType === "new" && (
+                  <div className="bg-popover rounded-2xl p-8 md:p-10 border border-border shadow-sm">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
+                        <ClipboardList className="w-5 h-5 text-accent" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-serif text-foreground">{t("patientDetails")}</h2>
+                        <p className="text-muted-foreground font-body text-xs">{t("provideInfo")}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-5">
+                      <div>
+                        <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                          {t("fullName")} <span className="text-destructive">*</span>
+                        </label>
+                        <input type="text" value={patientName}
+                          onChange={(e) => { setPatientName(e.target.value); setPatientErrors(prev => ({ ...prev, name: "" })); }}
+                          placeholder={t("enterFullName")}
+                          className={`w-full px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.name ? "border-destructive" : "border-border"}`} />
+                        {patientErrors.name && <p className="font-body text-xs text-destructive mt-1">{patientErrors.name}</p>}
+                      </div>
+                      <div>
+                        <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                          {t("phoneNumber")} <span className="text-destructive">*</span>
+                        </label>
+                        <div className="flex gap-2">
+                          <select value={patientCountryCode} onChange={(e) => setPatientCountryCode(e.target.value)}
+                            className="w-24 px-3 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30">
+                            <option value="+965">+965</option>
+                            <option value="+966">+966</option>
+                            <option value="+971">+971</option>
+                            <option value="+973">+973</option>
+                            <option value="+968">+968</option>
+                            <option value="+974">+974</option>
+                            <option value="+20">+20</option>
+                            <option value="+91">+91</option>
+                            <option value="+44">+44</option>
+                            <option value="+1">+1</option>
+                          </select>
+                          <input type="tel" value={patientPhone}
+                            onChange={(e) => { setPatientPhone(e.target.value.replace(/\D/g, "")); setPatientErrors(prev => ({ ...prev, phone: "" })); }}
+                            placeholder={t("phonePlaceholder")}
+                            className={`flex-1 px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.phone ? "border-destructive" : "border-border"}`} />
+                        </div>
+                        {patientErrors.phone && <p className="font-body text-xs text-destructive mt-1">{patientErrors.phone}</p>}
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                            {t("age")} <span className="text-destructive">*</span>
+                          </label>
+                          <input type="number" min="0" max="150" value={patientAge}
+                            onChange={(e) => { setPatientAge(e.target.value); setPatientErrors(prev => ({ ...prev, age: "" })); }}
+                            placeholder={t("enterAge")}
+                            className={`w-full px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.age ? "border-destructive" : "border-border"}`} />
+                          {patientErrors.age && <p className="font-body text-xs text-destructive mt-1">{patientErrors.age}</p>}
+                        </div>
+                        <div>
+                          <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
+                            {t("gender")} <span className="text-destructive">*</span>
+                          </label>
+                          <select value={patientGender}
+                            onChange={(e) => { setPatientGender(e.target.value); setPatientErrors(prev => ({ ...prev, gender: "" })); }}
+                            className={`w-full px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.gender ? "border-destructive" : "border-border"}`}>
+                            <option value="">{t("selectGender")}</option>
+                            <option value="male">{t("male")}</option>
+                            <option value="female">{t("female")}</option>
+                          </select>
+                          {patientErrors.gender && <p className="font-body text-xs text-destructive mt-1">{patientErrors.gender}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {patientType === "returning" && (
+                  <div className="bg-popover rounded-2xl p-8 md:p-10 border border-border shadow-sm">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                        <LogIn className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-serif text-foreground">{t("patientLogin")}</h2>
+                        <p className="text-muted-foreground font-body text-xs">{t("loginToAccount")}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-5">
+                      <div>
+                        <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">{t("username")}</label>
+                        <input type="text" placeholder={t("enterUsername")}
+                          className="w-full px-4 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all" />
+                      </div>
+                      <div>
+                        <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">{t("password")}</label>
+                        <input type="password" placeholder={t("enterPassword")}
+                          className="w-full px-4 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all" />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <button className="font-body text-xs text-accent hover:text-primary transition-colors">{t("forgotPassword")}</button>
+                      </div>
+                      <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        className="w-full bg-primary text-primary-foreground py-3 rounded-xl font-body text-sm tracking-widest uppercase hover:bg-primary/90 transition-all flex items-center justify-center gap-2">
+                        <LogIn className="w-4 h-4" />
+                        {t("login")}
                       </motion.button>
-                    ))}
+                    </div>
                   </div>
+                )}
 
-                  <p className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-3">Available Time Slots</p>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                    {timeSlots.map((t) => {
-                      const disabled = unavailableSlots.includes(t);
-                      return (
-                        <motion.button
-                          key={t}
-                          whileHover={!disabled ? { scale: 1.05 } : {}}
-                          whileTap={!disabled ? { scale: 0.95 } : {}}
-                          disabled={disabled}
-                          onClick={() => setSelectedTime(t)}
-                          className={`py-2.5 rounded-lg border font-body text-sm transition-all ${
-                            disabled
-                              ? "bg-muted/20 text-muted-foreground/30 border-border cursor-not-allowed line-through"
-                              : selectedTime === t
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-background border-border hover:border-accent/40 text-foreground"
-                          }`}
-                        >
-                          {t}
-                        </motion.button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {patientType && (
+                  <button onClick={() => setPatientType(null)} className="mt-4 font-body text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    ← {t("changeSelection")}
+                  </button>
+                )}
               </div>
             </motion.div>
           )}
 
-          {/* ─── STEP 4: PATIENT DETAILS ─── */}
+          {/* STEP 4: CONFIRM */}
           {step === 4 && (
             <motion.div key="s4" variants={pageVariants} initial="initial" animate="animate" exit="exit" transition={{ duration: 0.35 }}>
               <div className="max-w-3xl mx-auto">
                 <div className="bg-popover rounded-2xl p-8 md:p-10 border border-border shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
-                      <ClipboardList className="w-5 h-5 text-accent" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-serif text-foreground">Patient Details</h2>
-                      <p className="text-muted-foreground font-body text-xs">Please provide your information to complete the booking</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-5">
-                    {/* Full Name */}
-                    <div>
-                      <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                        Full Name <span className="text-destructive">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={patientName}
-                        onChange={(e) => { setPatientName(e.target.value); setPatientErrors(prev => ({ ...prev, name: "" })); }}
-                        placeholder="Enter your full name"
-                        className={`w-full px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.name ? "border-destructive" : "border-border"}`}
-                      />
-                      {patientErrors.name && <p className="font-body text-xs text-destructive mt-1">{patientErrors.name}</p>}
-                    </div>
-
-                    {/* Phone */}
-                    <div>
-                      <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                        Phone Number <span className="text-destructive">*</span>
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={patientCountryCode}
-                          onChange={(e) => setPatientCountryCode(e.target.value)}
-                          className="w-24 px-3 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30"
-                        >
-                          <option value="+965">+965</option>
-                          <option value="+966">+966</option>
-                          <option value="+971">+971</option>
-                          <option value="+973">+973</option>
-                          <option value="+968">+968</option>
-                          <option value="+974">+974</option>
-                          <option value="+20">+20</option>
-                          <option value="+91">+91</option>
-                          <option value="+44">+44</option>
-                          <option value="+1">+1</option>
-                        </select>
-                        <input
-                          type="tel"
-                          value={patientPhone}
-                          onChange={(e) => { setPatientPhone(e.target.value.replace(/\D/g, "")); setPatientErrors(prev => ({ ...prev, phone: "" })); }}
-                          placeholder="Phone number"
-                          className={`flex-1 px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.phone ? "border-destructive" : "border-border"}`}
-                        />
-                      </div>
-                      {patientErrors.phone && <p className="font-body text-xs text-destructive mt-1">{patientErrors.phone}</p>}
-                    </div>
-
-                    {/* Nationality */}
-                    <div>
-                      <label className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                        Nationality <span className="text-destructive">*</span>
-                      </label>
-                      <select
-                        value={patientNationality}
-                        onChange={(e) => { setPatientNationality(e.target.value); setPatientErrors(prev => ({ ...prev, nationality: "" })); }}
-                        className={`w-full px-4 py-3 rounded-xl border bg-background font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30 transition-all ${patientErrors.nationality ? "border-destructive" : "border-border"}`}
-                      >
-                        <option value="">Select nationality</option>
-                        {nationalities.map((n) => (
-                          <option key={n} value={n}>{n}</option>
-                        ))}
-                      </select>
-                      {patientErrors.nationality && <p className="font-body text-xs text-destructive mt-1">{patientErrors.nationality}</p>}
-                    </div>
-
-                    {/* Optional fields */}
-                    <div className="pt-2 border-t border-border">
-                      <p className="font-body text-xs text-muted-foreground uppercase tracking-wider mb-4">Optional Information</p>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="font-body text-xs text-muted-foreground mb-1.5 block">Email</label>
-                          <input
-                            type="email"
-                            value={patientEmail}
-                            onChange={(e) => setPatientEmail(e.target.value)}
-                            placeholder="your@email.com"
-                            className="w-full px-4 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30"
-                          />
-                        </div>
-                        <div>
-                          <label className="font-body text-xs text-muted-foreground mb-1.5 block">Gender</label>
-                          <select
-                            value={patientGender}
-                            onChange={(e) => setPatientGender(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/30"
-                          >
-                            <option value="">Select</option>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="font-body text-xs text-muted-foreground mb-1.5 block">Age</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="150"
-                            value={patientAge}
-                            onChange={(e) => setPatientAge(e.target.value)}
-                            placeholder="Age"
-                            className="w-full px-4 py-3 rounded-xl border border-border bg-background font-body text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-accent/30"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* ─── STEP 5: CONFIRM ─── */}
-          {step === 5 && (
-            <motion.div key="s5" variants={pageVariants} initial="initial" animate="animate" exit="exit" transition={{ duration: 0.35 }}>
-              <div className="max-w-3xl mx-auto">
-                <div className="bg-popover rounded-2xl p-8 md:p-10 border border-border shadow-sm">
                   <h2 className="font-serif text-xl text-foreground mb-2">
-                    {isRequestMode ? "Review & Submit Request" : "Review & Confirm"}
+                    {isRequestMode ? t("reviewSubmit") : t("reviewConfirm")}
                   </h2>
                   {isRequestMode && (
                     <div className="bg-accent/5 border border-accent/10 rounded-xl p-4 mb-6">
-                      <p className="font-body text-sm text-accent font-medium">Appointment Request</p>
-                      <p className="font-body text-xs text-muted-foreground">
-                        The selected doctor is currently not available. We will get back to you within 6–12 hours with a confirmed slot.
-                      </p>
+                      <p className="font-body text-sm text-accent font-medium">{t("appointmentRequest")}</p>
+                      <p className="font-body text-xs text-muted-foreground">{t("requestNote")}</p>
                     </div>
                   )}
-
                   <div className="space-y-5">
                     {[
-                      { label: "Symptoms", value: allSymptoms.join(", "), icon: Thermometer, show: true },
-                      { label: "Department", value: selectedDeptObj?.name || "", icon: Building2, show: true },
-                      { label: "Doctor", value: selectedDoctorObj?.name || "", icon: User, show: true },
-                      { label: "Date", value: selectedDate ? `${dayNames[selectedDate.getDay()]}, ${selectedDate.getDate()} ${monthNames[selectedDate.getMonth()]}` : "", icon: CalendarDays, show: !isRequestMode },
-                      { label: "Time", value: selectedTime || "", icon: Clock, show: !isRequestMode },
-                      { label: "Patient", value: patientName, icon: ClipboardList, show: true },
-                      { label: "Phone", value: `${patientCountryCode} ${patientPhone}`, icon: Stethoscope, show: true },
-                      { label: "Nationality", value: patientNationality, icon: Shield, show: true },
+                      { label: t("symptoms"), value: allSymptoms.join(", "), icon: Thermometer, show: true },
+                      { label: t("department"), value: selectedDeptObj?.name || "", icon: Building2, show: true },
+                      { label: t("doctor"), value: selectedDoctorObj?.name || "", icon: User, show: true },
+                      { label: t("patient"), value: patientName, icon: ClipboardList, show: true },
+                      { label: t("phone"), value: `${patientCountryCode} ${patientPhone}`, icon: Stethoscope, show: true },
+                      { label: t("age"), value: patientAge, icon: User, show: true },
+                      { label: t("gender"), value: patientGender === "male" ? t("male") : t("female"), icon: User, show: true },
                     ].filter(row => row.show).map((row) => (
                       <div key={row.label} className="flex items-start gap-4 py-3 border-b border-border last:border-0">
                         <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
@@ -1041,16 +805,12 @@ const BookAppointment = () => {
 
         {/* Navigation Buttons */}
         <div className="max-w-3xl mx-auto flex items-center justify-between mt-8">
-          <motion.button
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
+          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
             onClick={step === 0 ? () => navigate("/") : handleBack}
-            className="flex items-center gap-2 text-muted-foreground font-body text-sm hover:text-foreground transition-colors"
-          >
+            className="flex items-center gap-2 text-muted-foreground font-body text-sm hover:text-foreground transition-colors">
             <ArrowLeft className="w-4 h-4" />
-            {step === 0 ? "Back to Home" : "Previous"}
+            {step === 0 ? t("backToHome") : t("previous")}
           </motion.button>
-
           <motion.button
             whileHover={canProceed() ? { scale: 1.03 } : {}}
             whileTap={canProceed() ? { scale: 0.97 } : {}}
@@ -1060,33 +820,19 @@ const BookAppointment = () => {
               canProceed()
                 ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-md"
                 : "bg-muted text-muted-foreground cursor-not-allowed"
-            }`}
-          >
-            {step === 5 ? (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                {isRequestMode ? "Submit Request" : "Confirm Booking"}
-              </>
+            }`}>
+            {step === 4 ? (
+              <><CheckCircle2 className="w-4 h-4" />{isRequestMode ? t("submitRequest") : t("confirmBooking")}</>
             ) : step === 0 ? (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Analyze Symptoms
-              </>
+              <><Sparkles className="w-4 h-4" />{t("analyzeSymptoms")}</>
             ) : step === 2 && isRequestMode ? (
-              <>
-                <Clock className="w-4 h-4" />
-                Request Appointment
-              </>
+              <><Clock className="w-4 h-4" />{t("requestAppointment")}</>
             ) : (
-              <>
-                Continue
-                <ArrowRight className="w-4 h-4" />
-              </>
+              <>{t("continue")} <ArrowRight className="w-4 h-4" /></>
             )}
           </motion.button>
         </div>
       </div>
-
       <Footer />
       <ScrollToTop />
     </div>
